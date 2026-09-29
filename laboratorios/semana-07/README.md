@@ -4,7 +4,7 @@ Tubería ELT reproducible que **ingiere** los archivos mensuales de NYC Yellow T
 
 | Pieza | Tecnología |
 |---|---|
-| Infraestructura | Docker Compose (Kestra 2.0 + Postgres), imagen propia con dbt |
+| Infraestructura | Docker Compose (Kestra 2.0.3 + Postgres), imagen propia con dbt |
 | Ingesta (E + L) | Flow de Kestra `nyc_taxi_elt` |
 | Data warehouse | Snowflake (`NYC_TAXI`: RAW, BRONZE, SILVER, GOLD) |
 | Transformación (T) | dbt-core + dbt-snowflake + dbt_utils |
@@ -24,7 +24,7 @@ semana-07/
 ├── .env.example              # plantilla de credenciales (copiar a .env)
 ├── snowflake/setup.sql       # warehouse, DB, schemas, stage, file format, tabla RAW, rol y usuario
 ├── kestra/flows/
-│   ├── test_snowflake.yml    # prueba de conexión
+│   ├── test_snowflake.yml    # prueba de conexión (se cargan solos al levantar Kestra)
 │   └── nyc_taxi_elt.yml      # ingesta + dbt build
 ├── dbt/nyc_taxi/             # proyecto dbt
 │   ├── seeds/                # catálogos del TLC (zonas, vendors, tarifas, pagos)
@@ -47,7 +47,7 @@ semana-07/
    docker compose up -d --build
    ```
    UI de Kestra en http://localhost:8080 (`admin@kestra.io` / `Admin1234`).
-5. **Flows.** En Kestra → *Flows → Create*, pegar y guardar `kestra/flows/test_snowflake.yml` y `kestra/flows/nyc_taxi_elt.yml`. Ejecutar primero `test_snowflake` para validar la conexión.
+5. **Flows.** No hay que crearlos a mano: `docker-compose.yml` monta `kestra/flows/` y Kestra los carga al arrancar (`--flow-path`). Aparecen en *Flows*, namespace `usfq.nyc_taxi`. Ejecutar primero `test_snowflake` para validar la conexión.
 6. **Pipeline completo.** Ejecutar `nyc_taxi_elt` (por defecto carga los 20 meses y al final corre `dbt build`).
 
 Para ejecutar solo dbt (útil al depurar):
@@ -71,7 +71,7 @@ Luego, `resumen` cuenta filas por archivo y `dbt_build` construye y prueba todas
 
 **Idempotencia.** Re-ejecutar un mes **reemplaza** sus filas (DELETE + COPY) en vez de sumarlas. En dbt todos los modelos se reconstruyen desde RAW, así que si RAW no tiene duplicados, tampoco los tienen las capas siguientes.
 
-> **Evidencia:** `2025-01` tenía 3,475,226 filas (`_loaded_at` 15:58). Tras re-ejecutarlo quedó en **3,475,226** filas (`_loaded_at` 17:09): se recargó sin duplicar. *(capturas en `docs/`)*
+> **Evidencia:** `2025-01` tenía 3,475,226 filas (`_loaded_at` 15:58). Tras re-ejecutarlo quedó en **3,475,226** filas (`_loaded_at` 17:09): se recargó sin duplicar.
 
 **Nota sobre agosto 2026:** al 28/09/2026 el TLC aún no publica Yellow Taxi de 2026-08 (responde HTTP 403). El `Loop` usa `transmitFailed: false`, así que ese mes falla de forma aislada, se cargan los otros 19 y el flow continúa. Cuando el TLC lo publique, basta re-ejecutar el flow: se agrega sin duplicar nada.
 
@@ -86,10 +86,11 @@ Mismas columnas y tipos que la fuente, sin limpieza. Agrega metadata de linaje: 
 |---|---|---|---|
 | Nombres / formatos | `VendorID`, `PULocationID`, `Airport_fee`; flag `Y`/`N` | snake_case; flag → `BOOLEAN` | Convención consistente y tipo semántico correcto |
 | Tipos | IDs como float en algunos meses; montos float | IDs → `INTEGER`; montos → `NUMBER(10,2)` | Evitar errores de redondeo y joins con tipos distintos |
-| Nulos | `passenger_count`, `RatecodeID` y recargos nulos en bloque | `RatecodeID` nulo → 99 (desconocido); recargos nulos → 0; `passenger_count` se deja NULL | 99 es el código oficial de desconocido; un recargo nulo equivale a no cobrado; imputar pasajeros sesgaría promedios |
+| Nulos | `passenger_count`, `RatecodeID` y recargos nulos en bloque; `passenger_count = 0` | `RatecodeID` nulo → 99 (desconocido); recargos nulos → 0; `passenger_count` nulo **o 0** → NULL | 99 es el código oficial de desconocido; un recargo nulo equivale a no cobrado; un viaje no puede tener 0 pasajeros, así que 0 es un dato no capturado (igual que nulo), e imputarlo sesgaría promedios |
 | Códigos fuera de diccionario | vendor, zona o pago inválidos | → miembro "desconocido" de la dimensión (-1, 264, 5) | Conserva el viaje y mantiene la integridad referencial |
 | Duplicados | No hay llave natural | `trip_id` = hash de vendor, fechas, zonas, distancia, montos y pago; `QUALIFY ROW_NUMBER() = 1` | Dos filas con los mismos atributos son el mismo viaje |
 | Registros inválidos | Fechas fuera del mes del archivo, duración ≤ 0 o > 24 h, distancia < 0 o > 200 mi, montos negativos | Se excluyen y se registra el motivo en `reject_reason` | Son errores de captura o anulaciones/reembolsos, no viajes |
+| Casos límite que **se conservan** | Distancia = 0 o tarifa = 0 | Se mantienen como válidos | Tienen duración y fechas coherentes: pueden ser viajes cancelados con cargo, tarifas negociadas o fallas del taxímetro. Excluirlos perdería ingresos reales; se pueden filtrar en el análisis si hace falta |
 
 `slv_quality_report` cuantifica, por periodo, cuántos registros son válidos y cuántos se descartaron por cada motivo:
 

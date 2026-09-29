@@ -1,7 +1,8 @@
 # Imagen de Kestra + dbt-snowflake.
 # Asi Kestra puede ejecutar dbt directamente (tarea shell con Process runner),
 # usando el proyecto montado en /app/dbt y las variables ENV_SNOWFLAKE_* del .env.
-FROM kestra/kestra:latest
+# Version fijada (no "latest"): el flow usa sintaxis de Kestra 2.0 (Loop, sin pluginDefaults).
+FROM kestra/kestra:v2.0.3
 
 USER root
 RUN apt-get update \

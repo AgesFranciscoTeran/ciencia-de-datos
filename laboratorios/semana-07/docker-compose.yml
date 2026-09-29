@@ -27,11 +27,13 @@ services:
     build: .                    # Dockerfile = Kestra + dbt-snowflake
     image: nyc-taxi-kestra:local
     user: "root"
-    command: server standalone
+    # --flow-path: al arrancar, Kestra carga los flows de kestra/flows/ (no hay que pegarlos en la UI)
+    command: server standalone --flow-path /app/flows
     volumes:
       - kestra-data:/app/storage
       - /tmp/kestra-wd:/tmp/kestra-wd
       - ./dbt:/app/dbt            # proyecto dbt visible dentro de Kestra
+      - ./kestra/flows:/app/flows   # flows versionados en el repo
     # Credenciales de Snowflake: se leen del archivo .env (NO se sube a GitHub).
     # Kestra expone las variables que empiezan con ENV_ como {{ envs.nombre }}.
     env_file:

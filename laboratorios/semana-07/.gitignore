@@ -5,6 +5,7 @@
 dbt/**/target/
 dbt/**/dbt_packages/
 dbt/**/logs/
+dbt/**/.user.yml
 
 # Datos descargados
 *.parquet
