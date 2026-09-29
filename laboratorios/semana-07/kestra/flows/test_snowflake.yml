@@ -1,0 +1,17 @@
+# Flow de prueba: confirma que Kestra puede conectarse a Snowflake con ELT_USER.
+# Si devuelve tu usuario, rol y warehouse, la conexion funciona.
+id: test_snowflake
+namespace: usfq.nyc_taxi
+
+tasks:
+  - id: whoami
+    type: io.kestra.plugin.jdbc.snowflake.Query
+    url: "jdbc:snowflake://{{ envs.snowflake_account }}.snowflakecomputing.com?warehouse={{ envs.snowflake_warehouse }}&db={{ envs.snowflake_database }}&role={{ envs.snowflake_role }}"
+    username: "{{ envs.snowflake_user }}"
+    password: "{{ envs.snowflake_password }}"
+    sql: SELECT CURRENT_USER() AS usuario, CURRENT_ROLE() AS rol, CURRENT_WAREHOUSE() AS wh
+    fetchType: FETCH_ONE
+
+  - id: mostrar
+    type: io.kestra.plugin.core.log.Log
+    message: "Conectado: {{ outputs.whoami.row }}"

@@ -1,0 +1,128 @@
+# =====================================================================
+# Laboratorio Integrador I - Flow ELT (compatible con Kestra 2.x)
+# Por cada mes: descarga el parquet del TLC -> lo sube al stage de
+# Snowflake -> borra lo que ya hubiera de ese archivo -> COPY INTO RAW.
+# Es idempotente: re-ejecutar un mes REEMPLAZA sus filas, no las duplica.
+# Al final, dbt transforma RAW -> BRONZE -> SILVER -> GOLD y valida con tests.
+#
+# Nota Kestra 2.0: ForEach fue reemplazado por Loop ({{ item.value }}) y
+# pluginDefaults ya no existe, por eso la conexion va en cada tarea.
+# =====================================================================
+id: nyc_taxi_elt
+namespace: usfq.nyc_taxi
+
+inputs:
+  - id: months
+    type: ARRAY
+    itemType: STRING
+    description: Meses a cargar (YYYY-MM). Por defecto los 20 meses del laboratorio.
+    defaults:
+      - "2025-01"
+      - "2025-02"
+      - "2025-03"
+      - "2025-04"
+      - "2025-05"
+      - "2025-06"
+      - "2025-07"
+      - "2025-08"
+      - "2025-09"
+      - "2025-10"
+      - "2025-11"
+      - "2025-12"
+      - "2026-01"
+      - "2026-02"
+      - "2026-03"
+      - "2026-04"
+      - "2026-05"
+      - "2026-06"
+      - "2026-07"
+      - "2026-08"
+
+variables:
+  base_url: "https://d37ci6vzurychx.cloudfront.net/trip-data"
+  stage: "@NYC_TAXI.RAW.TAXI_STAGE/yellow/"   # la "/" final es obligatoria: COPY concatena ruta + nombre de archivo
+  table: "NYC_TAXI.RAW.YELLOW_TRIPDATA"
+
+tasks:
+  - id: por_mes
+    type: io.kestra.plugin.core.flow.Loop
+    values: "{{ inputs.months }}"
+    concurrencyLimit: 2          # 2 meses en paralelo: rapido sin saturar tu PC
+    # Si un mes aun no esta publicado por el TLC (ej. 2026-08 al 28/09/2026 -> HTTP 403),
+    # esa iteracion falla pero el flow continua con los demas meses.
+    # Como la carga es idempotente, re-ejecutar cuando se publique lo agrega sin duplicar.
+    transmitFailed: false
+    tasks:
+      # 1) Extract: descarga el parquet del mes
+      - id: download
+        type: io.kestra.plugin.core.http.Download
+        uri: "{{ vars.base_url }}/yellow_tripdata_{{ item.value }}.parquet"
+
+      # 2) Sube el archivo al stage interno (PUT). compress=false: parquet ya viene comprimido
+      - id: upload_stage
+        type: io.kestra.plugin.jdbc.snowflake.Upload
+        url: "jdbc:snowflake://{{ envs.snowflake_account }}.snowflakecomputing.com?warehouse={{ envs.snowflake_warehouse }}&db={{ envs.snowflake_database }}&role={{ envs.snowflake_role }}"
+        username: "{{ envs.snowflake_user }}"
+        password: "{{ envs.snowflake_password }}"
+        from: "{{ outputs.download.uri }}"
+        stageName: "@NYC_TAXI.RAW.TAXI_STAGE"
+        prefix: "yellow"
+        fileName: "yellow_tripdata_{{ item.value }}.parquet"
+        compress: false
+
+      # 3) Idempotencia: elimina las filas previas de ESTE archivo antes de recargarlo
+      - id: delete_previo
+        type: io.kestra.plugin.jdbc.snowflake.Query
+        url: "jdbc:snowflake://{{ envs.snowflake_account }}.snowflakecomputing.com?warehouse={{ envs.snowflake_warehouse }}&db={{ envs.snowflake_database }}&role={{ envs.snowflake_role }}"
+        username: "{{ envs.snowflake_user }}"
+        password: "{{ envs.snowflake_password }}"
+        sql: |
+          DELETE FROM {{ vars.table }}
+          WHERE _source_file LIKE '%yellow_tripdata_{{ item.value }}.parquet'
+
+      # 4) Load: copia el parquet a la tabla RAW agregando la metadata de origen y carga
+      - id: copy_into
+        type: io.kestra.plugin.jdbc.snowflake.Query
+        url: "jdbc:snowflake://{{ envs.snowflake_account }}.snowflakecomputing.com?warehouse={{ envs.snowflake_warehouse }}&db={{ envs.snowflake_database }}&role={{ envs.snowflake_role }}"
+        username: "{{ envs.snowflake_user }}"
+        password: "{{ envs.snowflake_password }}"
+        sql: |
+          COPY INTO {{ vars.table }}
+          FROM {{ vars.stage }}
+          FILES = ('yellow_tripdata_{{ item.value }}.parquet')
+          FILE_FORMAT = (FORMAT_NAME = 'NYC_TAXI.RAW.PARQUET_FF')
+          MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE
+          INCLUDE_METADATA = (_source_file = METADATA$FILENAME, _loaded_at = METADATA$START_SCAN_TIME)
+          FORCE = TRUE
+
+      # 5) Limpia el stage para no acumular almacenamiento
+      - id: limpiar_stage
+        type: io.kestra.plugin.jdbc.snowflake.Query
+        url: "jdbc:snowflake://{{ envs.snowflake_account }}.snowflakecomputing.com?warehouse={{ envs.snowflake_warehouse }}&db={{ envs.snowflake_database }}&role={{ envs.snowflake_role }}"
+        username: "{{ envs.snowflake_user }}"
+        password: "{{ envs.snowflake_password }}"
+        sql: "REMOVE {{ vars.stage }}yellow_tripdata_{{ item.value }}.parquet"
+
+  # Resumen: filas cargadas por archivo (sirve como evidencia de que no hay duplicados)
+  - id: resumen
+    type: io.kestra.plugin.jdbc.snowflake.Query
+    url: "jdbc:snowflake://{{ envs.snowflake_account }}.snowflakecomputing.com?warehouse={{ envs.snowflake_warehouse }}&db={{ envs.snowflake_database }}&role={{ envs.snowflake_role }}"
+    username: "{{ envs.snowflake_user }}"
+    password: "{{ envs.snowflake_password }}"
+    sql: |
+      SELECT _source_file, COUNT(*) AS filas, MAX(_loaded_at) AS cargado
+      FROM NYC_TAXI.RAW.YELLOW_TRIPDATA
+      GROUP BY 1 ORDER BY 1
+    fetchType: FETCH
+
+  # T del ELT: dbt construye Bronze -> Silver -> Gold y corre todos los tests.
+  # `dbt build` = seeds + modelos + tests en orden de dependencias; si un test
+  # falla, los modelos que dependen de el no se construyen.
+  - id: dbt_build
+    type: io.kestra.plugin.scripts.shell.Commands
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process   # dbt esta instalado en la imagen (Dockerfile)
+    commands:
+      - cd /app/dbt/nyc_taxi
+      - dbt deps --profiles-dir .
+      - dbt build --profiles-dir .

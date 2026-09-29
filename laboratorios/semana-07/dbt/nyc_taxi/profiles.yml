@@ -1,0 +1,15 @@
+# Conexion de dbt a Snowflake. No tiene claves: las lee de las variables
+# ENV_SNOWFLAKE_* que Docker carga desde el .env (se puede subir a GitHub).
+nyc_taxi:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: "{{ env_var('ENV_SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('ENV_SNOWFLAKE_USER') }}"
+      password: "{{ env_var('ENV_SNOWFLAKE_PASSWORD') }}"
+      role: "{{ env_var('ENV_SNOWFLAKE_ROLE') }}"
+      warehouse: "{{ env_var('ENV_SNOWFLAKE_WAREHOUSE') }}"
+      database: "{{ env_var('ENV_SNOWFLAKE_DATABASE') }}"
+      schema: PUBLIC
+      threads: 4
