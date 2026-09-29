@@ -1,0 +1,45 @@
+# Proyecto dbt: transforma RAW -> BRONZE -> SILVER -> GOLD en Snowflake
+name: nyc_taxi
+version: "1.0.0"
+config-version: 2
+profile: nyc_taxi
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # rango del calendario (dim_date)
+  date_start: "2025-01-01"
+  date_end: "2027-01-01"
+
+models:
+  nyc_taxi:
+    bronze:
+      +schema: BRONZE
+      +materialized: view      # Bronze = espejo de RAW + metadata; vista, no duplica almacenamiento
+    silver:
+      +schema: SILVER
+      +materialized: table     # reconstruccion completa -> re-ejecutar no duplica
+    gold:
+      +schema: GOLD
+      +materialized: table
+
+seeds:
+  nyc_taxi:
+    +schema: BRONZE            # catalogos de referencia, tal como vienen de la fuente
+    taxi_zone_lookup:
+      +column_types:
+        LocationID: integer
+    vendors:
+      +column_types:
+        vendor_id: integer
+    rate_codes:
+      +column_types:
+        rate_code_id: integer
+    payment_types:
+      +column_types:
+        payment_type_id: integer

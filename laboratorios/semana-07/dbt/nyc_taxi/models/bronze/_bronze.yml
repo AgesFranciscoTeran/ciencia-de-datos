@@ -1,0 +1,28 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Datos originales cargados por Kestra (COPY INTO) sin transformar.
+    database: NYC_TAXI
+    schema: RAW
+    tables:
+      - name: yellow_tripdata
+        identifier: YELLOW_TRIPDATA
+        columns:
+          - name: _source_file
+            data_tests: [not_null]
+          - name: _loaded_at
+            data_tests: [not_null]
+
+models:
+  - name: brz_yellow_tripdata
+    description: >
+      Capa Bronze. Mismas columnas y tipos que la fuente + metadata de linaje:
+      archivo de origen, periodo (YYYY-MM) y fecha de carga. Sin limpieza.
+    columns:
+      - name: _source_file
+        data_tests: [not_null]
+      - name: source_period
+        data_tests: [not_null]
+      - name: _loaded_at
+        data_tests: [not_null]

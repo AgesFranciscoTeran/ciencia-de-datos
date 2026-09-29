@@ -1,0 +1,97 @@
+version: 2
+models:
+- name: dim_date
+  description: Calendario diario.
+  columns:
+  - name: date_key
+    data_tests:
+    - unique
+    - not_null
+- name: dim_time
+  description: Horas del dia con franja horaria.
+  columns:
+  - name: hour_key
+    data_tests:
+    - unique
+    - not_null
+- name: dim_location
+  description: Zonas de taxi de NYC (catalogo TLC). Se usa para pickup y dropoff.
+  columns:
+  - name: location_id
+    data_tests:
+    - unique
+    - not_null
+- name: dim_vendor
+  columns:
+  - name: vendor_id
+    data_tests:
+    - unique
+    - not_null
+- name: dim_rate_code
+  columns:
+  - name: rate_code_id
+    data_tests:
+    - unique
+    - not_null
+- name: dim_payment_type
+  columns:
+  - name: payment_type_id
+    data_tests:
+    - unique
+    - not_null
+- name: fct_trips
+  description: 'Hechos de viajes. Grano: un viaje valido.'
+  columns:
+  - name: trip_id
+    data_tests:
+    - unique
+    - not_null
+  - name: vendor_id
+    data_tests:
+    - not_null
+    - relationships:
+        arguments:
+          to: ref('dim_vendor')
+          field: vendor_id
+  - name: rate_code_id
+    data_tests:
+    - not_null
+    - relationships:
+        arguments:
+          to: ref('dim_rate_code')
+          field: rate_code_id
+  - name: payment_type_id
+    data_tests:
+    - not_null
+    - relationships:
+        arguments:
+          to: ref('dim_payment_type')
+          field: payment_type_id
+  - name: pickup_location_id
+    data_tests:
+    - not_null
+    - relationships:
+        arguments:
+          to: ref('dim_location')
+          field: location_id
+  - name: dropoff_location_id
+    data_tests:
+    - not_null
+    - relationships:
+        arguments:
+          to: ref('dim_location')
+          field: location_id
+  - name: pickup_date_key
+    data_tests:
+    - not_null
+    - relationships:
+        arguments:
+          to: ref('dim_date')
+          field: date_key
+  - name: pickup_hour_key
+    data_tests:
+    - not_null
+    - relationships:
+        arguments:
+          to: ref('dim_time')
+          field: hour_key

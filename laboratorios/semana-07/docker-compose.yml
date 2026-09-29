@@ -1,0 +1,70 @@
+# =====================================================================
+# Laboratorio Integrador I - Infraestructura
+# Levanta Kestra (orquestador) + Postgres (base de metadata de Kestra).
+# Uso:  docker compose up -d    ->  UI en http://localhost:8080
+# =====================================================================
+
+volumes:
+  postgres-data:
+  kestra-data:
+
+services:
+  postgres:
+    image: postgres:16
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: kestra
+      POSTGRES_USER: kestra
+      POSTGRES_PASSWORD: k3str4
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d kestra -U kestra"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  kestra:
+    build: .                    # Dockerfile = Kestra + dbt-snowflake
+    image: nyc-taxi-kestra:local
+    user: "root"
+    command: server standalone
+    volumes:
+      - kestra-data:/app/storage
+      - /tmp/kestra-wd:/tmp/kestra-wd
+      - ./dbt:/app/dbt            # proyecto dbt visible dentro de Kestra
+    # Credenciales de Snowflake: se leen del archivo .env (NO se sube a GitHub).
+    # Kestra expone las variables que empiezan con ENV_ como {{ envs.nombre }}.
+    env_file:
+      - .env
+    # OJO: map syntax en todo el bloque, porque KESTRA_CONFIGURATION es multilinea.
+    environment:
+      KESTRA_CONFIGURATION: |
+        datasources:
+          postgres:
+            url: jdbc:postgresql://postgres:5432/kestra
+            driverClassName: org.postgresql.Driver
+            username: kestra
+            password: k3str4
+        kestra:
+          server:
+            basicAuth:
+              username: admin@kestra.io
+              password: Admin1234
+          repository:
+            type: postgres
+          storage:
+            type: local
+            local:
+              basePath: "/app/storage"
+          queue:
+            type: postgres
+          tasks:
+            tmpDir:
+              path: /tmp/kestra-wd/tmp
+          url: http://localhost:8080/
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy

@@ -1,0 +1,71 @@
+version: 2
+models:
+- name: slv_trips_flagged
+  description: Registros estandarizados con su motivo de rechazo (null = valido).
+- name: slv_yellow_trips
+  description: Viajes validos, tipados, estandarizados y deduplicados.
+  columns:
+  - name: trip_id
+    description: Llave sustituta (hash de los atributos del viaje).
+    data_tests:
+    - unique
+    - not_null
+  - name: pickup_datetime
+    data_tests:
+    - not_null
+  - name: dropoff_datetime
+    data_tests:
+    - not_null
+  - name: vendor_id
+    data_tests:
+    - not_null
+    - accepted_values:
+        arguments:
+          values:
+          - 1
+          - 2
+          - 6
+          - 7
+          - -1
+          quote: false
+  - name: rate_code_id
+    data_tests:
+    - not_null
+    - accepted_values:
+        arguments:
+          values:
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          - 6
+          - 99
+          quote: false
+  - name: payment_type_id
+    data_tests:
+    - not_null
+    - accepted_values:
+        arguments:
+          values:
+          - 0
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          - 6
+          quote: false
+  - name: total_amount
+    data_tests:
+    - not_null
+    - dbt_utils.expression_is_true:
+        arguments:
+          expression: '>= 0'
+  - name: trip_duration_min
+    data_tests:
+    - dbt_utils.expression_is_true:
+        arguments:
+          expression: '> 0'
+- name: slv_quality_report
+  description: Conteo de registros validos y descartados por motivo y periodo.
